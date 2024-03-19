@@ -1,0 +1,140 @@
+#include "includes.h"
+
+
+#define  TASK_STK_SIZE                 512       /* Size of each task's stacks (# of WORDs)            */
+#define  N_TASKS                         5       /* Number of identical tasks                          */
+
+typedef struct {
+    INT16U compTime;
+    INT16U period;
+} PERIOD_ARG;
+
+OS_STK        TaskStk[N_TASKS][TASK_STK_SIZE];        /* Tasks stacks                                  */
+OS_STK        TaskStartStk[TASK_STK_SIZE];
+PERIOD_ARG    Period_Args[N_TASKS];
+
+void PeriodTask(void *data);                 /* Function prototypes of tasks                  */
+void TaskStart(void *data);                  /* Function prototypes of Startup task           */
+static void TaskStartCreateTasks(void);
+
+
+void  main (void)
+{
+    OSInit();                                              /* Initialize uC/OS-II                      */
+    PC_DOSSaveReturn();                                    /* Save environment to return to DOS        */
+    PC_VectSet(uCOS, OSCtxSw);                             /* Install uC/OS-II's context switch vector */
+    
+    OSTaskCreate(TaskStart, (void *)0, &TaskStartStk[TASK_STK_SIZE - 1], 0);
+    
+    OSStart();                                             /* Start multitasking                       */
+}
+
+void  TaskStart (void *pdata)
+{
+#if OS_CRITICAL_METHOD == 3                                /* Allocate storage for CPU status register */
+    OS_CPU_SR  cpu_sr;
+#endif
+    INT16S     key;
+
+    // RTOS_LAB1-3
+    INT16U     start;
+
+    pdata = pdata;                                         /* Prevent compiler warning                 */\
+
+    OS_ENTER_CRITICAL();
+    PC_VectSet(0x08, OSTickISR);                           /* Install uC/OS-II's clock tick ISR        */
+    PC_SetTickRate(OS_TICKS_PER_SEC);                      /* Reprogram tick rate                      */
+    OS_EXIT_CRITICAL();
+
+
+
+    // RTOS_LAB1-2 initialize ISR_Mesg
+    ISR_Mesg.mesg[0] = '\0';
+    ISR_Mesg.length = 0;
+    OSTimeSet(0);
+    
+
+    TaskStartCreateTasks();                                /* Create all the application tasks         */
+    for (;;) {
+        if (PC_GetKey(&key) == TRUE) {                     /* See if key has been pressed              */
+            if (key == 0x1B) {                             /* Yes, see if it's the ESCAPE key          */
+                PC_DOSReturn();                            /* Return to DOS                            */
+            }
+        }
+
+
+        if(ISR_Mesg.length > 0){
+            printf("%s", ISR_Mesg.mesg);
+            ISR_Mesg.length = 0;
+            if(OSTime > 100){
+                printf("Press any key to exit...\n");
+                while(PC_GetKey(&key) == 0);
+                PC_DOSReturn();
+            }
+        }
+
+        OSCtxSwCtr = 0;                                    /* Clear context switch counter             */
+        OSTimeDlyHMSM(0, 0, 1, 0);                       /* Wait one second                          */
+    }
+}
+
+// RTOS_LAB1-1: Create Period Task
+static  void  TaskStartCreateTasks (void) {
+    Period_Args[0].compTime = 1;
+    Period_Args[0].period   = 3;
+    Period_Args[1].compTime = 3;
+    Period_Args[1].period   = 6;
+    Period_Args[2].compTime = 4;
+    Period_Args[2].period   = 9;
+    OSTaskCreate(PeriodTask,
+                (void *) &Period_Args[0],
+                &TaskStk[0][TASK_STK_SIZE-1],
+                (INT8U) 1);
+    OSTaskCreate(PeriodTask,
+                (void *) &Period_Args[1],
+                &TaskStk[1][TASK_STK_SIZE-1],
+                (INT8U) 2);
+    // OSTaskCreate(PeriodTask,
+    //             (void *) &Period_Args[2],
+    //             &TaskStk[2][TASK_STK_SIZE-1],
+    //             (INT8U) 3);
+
+}
+
+// RTOS_LAB1-1: Periodtask prototype
+void PeriodTask(void *pdata) {
+    char mesg[32];
+    int start;
+    int end;
+    int toDelay;
+    PERIOD_ARG *arg = (PERIOD_ARG *) pdata;
+
+    OS_ENTER_CRITICAL();
+    OSTCBCur->compTime = arg->compTime;
+    OSTCBCur->period = arg->period;
+    OS_EXIT_CRITICAL();
+
+    start = OSTimeGet();
+    for (;;) {
+        while (OSTCBCur->compTime > 0) {
+            /* Computing */
+        }
+        end = OSTimeGet();
+        toDelay = (OSTCBCur->period) - (end - start);
+        
+        OS_ENTER_CRITICAL();
+        OSTCBCur->compTime = arg->compTime;        // Reset the counter
+        // RTOS_LAB1-2 log deadline violation
+        if(toDelay < 0){
+            sprintf(mesg, "%5d Task%2d exceed the deadline.\n", (int)OSTime , (int)OSTCBCur->OSTCBPrio);
+            if(strlen(mesg) + ISR_Mesg.length < ISR_MESG_MAX_LEN){
+                strcpy(ISR_Mesg.mesg + ISR_Mesg.length, mesg);
+                ISR_Mesg.length += strlen(mesg);
+            }
+        }
+        start = start + (OSTCBCur->period);        // Next start time
+        OS_EXIT_CRITICAL();
+
+        OSTimeDly(toDelay);
+    }
+}

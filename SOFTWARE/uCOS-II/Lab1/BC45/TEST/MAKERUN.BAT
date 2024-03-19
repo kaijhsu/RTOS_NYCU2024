@@ -1,0 +1,14 @@
+RD    ..\WORK
+RD    ..\OBJ
+RD    ..\LST
+DEL   .\TEST.EXE
+
+MD    ..\WORK
+MD    ..\OBJ
+MD    ..\LST
+CD    ..\WORK
+COPY  ..\TEST\TEST.MAK   TEST.MAK
+C:\BC45\BIN\MAKE -f TEST.MAK
+CD    ..\TEST
+
+TEST.EXE
